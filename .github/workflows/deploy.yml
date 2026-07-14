@@ -1,0 +1,79 @@
+name: Backend CI/CD - Hostinger VPS Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Run Tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run basic import test
+        run: python -c "from app.main import app; print('App import OK')"
+        env:
+          DATABASE_URL: "postgresql://postgres:test@localhost:5432/gordon"
+
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Hostinger VPS
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            echo "=== Starting deployment ==="
+            cd /opt/gordon-backend
+
+            echo "=== Pulling latest code ==="
+            git pull origin main
+
+            echo "=== Rebuilding Docker image ==="
+            docker build --load -t gordon-backend .
+
+            echo "=== Stopping old container ==="
+            docker stop gordon-backend-container || true
+            docker rm gordon-backend-container || true
+
+            echo "=== Starting new container ==="
+            docker run -d \
+              --name gordon-backend-container \
+              --restart unless-stopped \
+              -p 8000:8000 \
+              -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+              -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+              -e STRIPE_SECRET_KEY="${{ secrets.STRIPE_SECRET_KEY }}" \
+              -e STRIPE_WEBHOOK_SECRET="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+              gordon-backend
+
+            echo "=== Waiting for container to start ==="
+            sleep 5
+
+            echo "=== Health check ==="
+            curl -f http://localhost:8000/api/health || exit 1
+
+            echo "=== Deployment completed successfully! ==="

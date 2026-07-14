@@ -1,0 +1,163 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-py"
+  output   = "../app/prisma_client"
+}
+
+model User {
+  id              String            @id @default(uuid())
+  email           String            @unique
+  passwordHash    String?           
+  googleId        String?           @unique
+  membershipLevel String            @default("free") // 'free' or 'premium'
+  createdAt       DateTime          @default(now())
+  progress        UserProgress[]
+  attempts        UserExamAttempt[]
+  payments        Payment[]
+}
+
+model Course {
+  id            String   @id @default(uuid())
+  title         String
+  description   String
+  thumbnailUrl  String
+  difficulty    String
+  isPopular     Boolean  @default(false)
+  courseType    String   @default("STANDARD")
+  lessons       Lesson[]
+  learningPaths CourseOnLearningPath[]
+}
+
+model Lesson {
+  id          String         @id @default(uuid())
+  courseId    String
+  course      Course         @relation(fields: [courseId], references: [id])
+  title       String
+  videoUrl    String         
+  textContent String
+  orderIndex  Int
+  progress    UserProgress[]
+}
+
+model UserProgress {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  lessonId  String
+  lesson    Lesson   @relation(fields: [lessonId], references: [id])
+  completed Boolean  @default(false)
+
+  @@unique([userId, lessonId])
+}
+
+model Question {
+  id            String   @id @default(uuid())
+  category      String
+  questionText  String
+  options       Json     
+  correctOption String
+  explanation   String
+  indexNumber   Int      @unique 
+}
+
+model UserExamAttempt {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  score       Int
+  passed      Boolean
+  completedAt DateTime @default(now())
+}
+
+model Payment {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  amount    Float
+  planType  String
+  createdAt DateTime @default(now())
+}
+
+model BlogPost {
+  id          String   @id @default(uuid())
+  title       String
+  slug        String   @unique
+  excerpt     String
+  content     String
+  category    String   // e.g. "CCNA", "CCNP", "Cybersecurity", "Career"
+  coverImage  String?
+  readTime    String   @default("5 min read")
+  published   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AboutContent {
+  id          String   @id @default(uuid())
+  title       String   @default("About Gordon IT Academy")
+  subTitle    String   @default("About")
+  paragraphs  Json     // String array: ["p1", "p2", ...]
+  stats       Json     // Array of objects: [{"icon": "Award", "label": "...", "sub": "..."}]
+  updatedAt   DateTime @updatedAt
+}
+
+model SubscriptionPlan {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  planType      String   // "free", "monthly", "yearly"
+  price         Float
+  billingPeriod String   // "forever", "month", "year"
+  description   String
+  features      Json     // Array of strings: ["feature 1", "feature 2"]
+  badge         String?  // e.g. "Most Popular", "Save 33%"
+  cta           String   // e.g. "Start Free", "Upgrade Now"
+  featured      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Testimonial {
+  id        String   @id @default(uuid())
+  name      String
+  role      String
+  company   String
+  rating    Int      @default(5)
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InterviewQuestion {
+  id            String   @id @default(uuid())
+  topic         String   // e.g., "CCNA"
+  questionText  String
+  correctAnswer String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model LearningPath {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  pathType    String   // "TOPIC" or "CAREER_TRACK"
+  iconUrl     String?
+  courses     CourseOnLearningPath[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CourseOnLearningPath {
+  id             String       @id @default(uuid())
+  learningPathId String
+  courseId       String
+  orderIndex     Int
+  learningPath   LearningPath @relation(fields: [learningPathId], references: [id])
+  course         Course       @relation(fields: [courseId], references: [id])
+  
+  @@unique([learningPathId, courseId])
+}
