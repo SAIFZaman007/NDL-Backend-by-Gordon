@@ -1,17 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.db import db
 from app.routers import auth_router, courses_router, exams_router, payments_router, admin_router, blog_router, about_router, subscriptions_router, testimonials_router, interview_router, learning_paths_router
 
 app = FastAPI(title="Network Design Labs Platform API", version="1.0.0")
 
 import os
-
-# Parse allowed origins from environment or use defaults.
-# Origin headers sent by browsers never include a trailing slash (it's
-# scheme+host+port only) — stripping any trailing slash here means an
-# env value like "https://example.com/" still matches the real
-# "https://example.com" Origin header instead of silently never matching.
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001,https://robiulsunnyemon.github.io")
 allowed_origins = [origin.strip().rstrip("/") for origin in allowed_origins_env.split(",")]
 
@@ -22,6 +17,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Uploaded media (blog cover images) ─────────────────────────
+UPLOAD_ROOT = os.getenv("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
+os.makedirs(os.path.join(UPLOAD_ROOT, "blog"), exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_ROOT), name="uploads")
 
 
 @app.on_event("startup")

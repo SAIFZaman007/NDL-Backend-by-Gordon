@@ -9,7 +9,6 @@ ENV PYTHONUNBUFFERED=1 \
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies needed for Prisma client binaries, Node/npm, and PostgreSQL connections
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     openssl \
@@ -26,7 +25,14 @@ COPY . .
 # Generate Prisma client locally inside the container filesystem
 RUN prisma generate
 
+RUN mkdir -p /app/uploads/blog
+
 # Expose backend port
 EXPOSE 8000
+
+# ── Container health check (30s) ────────────────────────────────────────────
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -fsS http://localhost:8000/api/health || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

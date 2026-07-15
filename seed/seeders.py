@@ -2,6 +2,7 @@ import asyncio
 import json
 import hashlib
 import os
+import re
 import sys
 import datetime
 from datetime import timedelta
@@ -12,6 +13,16 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import db
 from app.prisma_client import Json
+
+
+def slugify(text: str) -> str:
+    # Mirrors app/routers/blog_router.py slugify() exactly, so seeded slugs
+    # are byte-identical to slugs the API would generate for the same title.
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[\s_-]+', '-', text)
+    text = re.sub(r'^-+|-+$', '', text)
+    return text
 
 
 def hash_password(password: str) -> str:
@@ -290,11 +301,127 @@ INTERVIEW_QUESTIONS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Blog posts — real, on-topic articles with suitable royalty-free cover images
+# (Unsplash, matching the style already used for course thumbnails above).
+# coverImage is a plain URL string, exactly what BlogPost.coverImage expects,
+# so seeded posts and admin-uploaded local images ("/uploads/blog/...") render
+# identically on the public Blog page.
+# ---------------------------------------------------------------------------
+BLOG_POSTS = [
+    {
+        "title": "CCNA 200-301: A Complete 8-Week Study Plan",
+        "category": "CCNA",
+        "readTime": "8 min read",
+        "coverImage": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200&q=80",
+        "excerpt": "A realistic week-by-week roadmap to pass the CCNA on your first attempt — covering IP fundamentals, routing, switching, security, and automation.",
+        "content": (
+            "Passing the CCNA 200-301 is less about raw study hours and more about structure.\n\n"
+            "Weeks 1-2: Network fundamentals — the OSI and TCP/IP models, Ethernet, cabling, and IPv4 addressing. "
+            "Do not move on until you can subnet in under 30 seconds.\n\n"
+            "Weeks 3-4: Switching — VLANs, trunking, STP, and EtherChannel. Lab everything in Packet Tracer or CML.\n\n"
+            "Weeks 5-6: Routing — static routes, OSPFv2, and first-hop redundancy. Learn to read 'show ip route' fluently.\n\n"
+            "Week 7: Security fundamentals, wireless, and NAT/ACLs.\n\n"
+            "Week 8: Automation, REST APIs, and full-length practice exams. Review every wrong answer until the reasoning sticks."
+        ),
+        "published": True,
+    },
+    {
+        "title": "Cisco vs Juniper Certifications: Which Path Fits Your Career?",
+        "category": "Career",
+        "readTime": "6 min read",
+        "coverImage": "https://images.unsplash.com/photo-1544197150-b99a580bb7a8?w=1200&q=80",
+        "excerpt": "Both vendors offer respected certification tracks — but they serve slightly different career strategies. Here's how to choose.",
+        "content": (
+            "Cisco certifications (CCNA, CCNP, CCIE) dominate enterprise job postings and are the safest default for "
+            "most networking careers. The ecosystem, community, and study material are unmatched.\n\n"
+            "Juniper certifications (JNCIA, JNCIS, JNCIP, JNCIE) carry serious weight in service-provider, ISP, and "
+            "data-center environments where Junos is standard.\n\n"
+            "Practical guidance: start with Cisco for breadth and market demand, then add Juniper if your target "
+            "employers run Junos. The underlying protocols — OSPF, BGP, MPLS — are the same; only the CLI dialect changes. "
+            "Engineers who can speak both are rare and get paid accordingly."
+        ),
+        "published": True,
+    },
+    {
+        "title": "Subnetting Without Tears: The 5-Second Method",
+        "category": "Networking",
+        "readTime": "5 min read",
+        "coverImage": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&q=80",
+        "excerpt": "Stop drawing binary tables in the exam. This mental shortcut answers any subnetting question in seconds.",
+        "content": (
+            "Memorize one line: 128 192 224 240 248 252 254 255 — the mask values — and their block sizes: "
+            "128 64 32 16 8 4 2 1.\n\n"
+            "For any /n, find the 'interesting octet' (the one that isn't 0 or 255), take its block size, and the "
+            "networks simply count up by that block. Example: /28 → mask 255.255.255.240 → block size 16 → "
+            "subnets at .0, .16, .32... Usable hosts are always block size minus 2.\n\n"
+            "Drill this daily for a week with random /25-/30 questions and subnetting becomes muscle memory — "
+            "which is exactly what you need under exam time pressure."
+        ),
+        "published": True,
+    },
+    {
+        "title": "Zero Trust Architecture: Beyond the Buzzword",
+        "category": "Cybersecurity",
+        "readTime": "7 min read",
+        "coverImage": "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1200&q=80",
+        "excerpt": "'Never trust, always verify' sounds simple — implementing it isn't. What Zero Trust actually means for network engineers.",
+        "content": (
+            "Zero Trust replaces the castle-and-moat model with continuous verification: every request is "
+            "authenticated, authorized, and encrypted regardless of where it originates.\n\n"
+            "For network engineers this translates to concrete work: microsegmentation (VLANs and SGTs are your "
+            "friends), identity-aware access (802.1X, RADIUS, posture checks), least-privilege ACLs everywhere, "
+            "and telemetry — you cannot verify what you cannot see.\n\n"
+            "Start small: segment your most critical asset first, enforce MFA on every management plane, and kill "
+            "any flat Layer 2 domain that spans departments. Zero Trust is a direction of travel, not a product you buy."
+        ),
+        "published": True,
+    },
+    {
+        "title": "BGP Path Selection Explained with Real Scenarios",
+        "category": "CCNP",
+        "readTime": "9 min read",
+        "coverImage": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&q=80",
+        "excerpt": "Weight, local preference, AS-path, MED — the BGP best-path algorithm finally made intuitive, with scenarios you'll see in ENCOR and in production.",
+        "content": (
+            "BGP evaluates paths in strict order; the first tiebreaker that differs wins.\n\n"
+            "1. Highest Weight (Cisco-local, affects only this router).\n"
+            "2. Highest Local Preference (affects the whole AS — use it to prefer one exit point).\n"
+            "3. Locally originated routes.\n"
+            "4. Shortest AS-path (the one everyone remembers).\n"
+            "5. Lowest origin code, then lowest MED, then eBGP over iBGP, then lowest IGP metric to the next hop.\n\n"
+            "Scenario: dual-homed to two ISPs and outbound traffic favors the slow link? Raise Local Preference on "
+            "routes learned from the fast ISP. Inbound traffic lopsided? Prepend your AS on advertisements out the "
+            "link you want less used. Master these two levers and you can steer most real-world traffic problems."
+        ),
+        "published": True,
+    },
+    {
+        "title": "From Help Desk to Network Engineer in 18 Months",
+        "category": "Career",
+        "readTime": "6 min read",
+        "coverImage": "https://images.unsplash.com/photo-1573164713988-8665fc963095?w=1200&q=80",
+        "excerpt": "A practical, no-fluff progression plan: certifications, home labs, and the projects that make hiring managers call back.",
+        "content": (
+            "Months 1-6: Earn the CCNA while you work. Volunteer for every network ticket that crosses the help "
+            "desk queue — port security issues, VLAN moves, Wi-Fi complaints. That's free hands-on experience.\n\n"
+            "Months 7-12: Build a home lab (used Catalyst switches are cheap; CML and EVE-NG are cheaper). Document "
+            "three lab projects on GitHub or a blog: a segmented small-office network, an OSPF multi-area design, "
+            "and a site-to-site VPN.\n\n"
+            "Months 13-18: Start CCNP ENCOR, apply for NOC and junior network roles, and reference your documented "
+            "projects in every interview. Employers hire proof, not promises — and a public lab portfolio is proof."
+        ),
+        "published": True,
+    },
+]
+
+
 async def seed():
     print("Connecting to database...")
     await db.connect()
 
     print("Cleaning database...")
+    await db.blogpost.delete_many()
     await db.payment.delete_many()
     await db.userprogress.delete_many()
     await db.userexamattempt.delete_many()
@@ -657,9 +784,97 @@ async def seed():
             }
         )
 
+    print(f"Seeding Blog Posts ({len(BLOG_POSTS)} articles with cover images)...")
+    for post in BLOG_POSTS:
+        await db.blogpost.create(
+            data={
+                "title": post["title"],
+                "slug": slugify(post["title"]),
+                "excerpt": post["excerpt"],
+                "content": post["content"],
+                "category": post["category"],
+                "coverImage": post["coverImage"],
+                "readTime": post["readTime"],
+                "published": post["published"],
+            }
+        )
+
     print("Database seeding completed successfully!")
     await db.disconnect()
 
 
+# ---------------------------------------------------------------------------
+# Merged from the former seed/fix_correct_options.py (that file is now
+# retired — delete it). Same function name, same behavior, one entry point:
+#
+#   python seed/seeders.py                      -> full reseed
+#   python seed/seeders.py fix-correct-options  -> data repair only
+# ---------------------------------------------------------------------------
+async def fix_correct_options():
+    """
+    One-time data repair, NOT a reseed. Every existing Question row is
+    inspected; only rows where correctOption is a bare letter (A/B/C/D)
+    that doesn't already match one of that question's options are updated,
+    resolving the letter to the real option text at that position. Rows
+    that are already correct are left untouched. Safe to run more than
+    once — a second run will report everything as already correct and
+    change nothing.
+
+    This does not touch users, payments, courses, or any other table, and
+    does not modify prisma/schema.prisma.
+    """
+    LETTER_TO_INDEX = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4, "F": 5}
+
+    print("Connecting to database...")
+    await db.connect()
+
+    questions = await db.question.find_many()
+    print(f"Found {len(questions)} exam question(s). Checking correctOption integrity...\n")
+
+    already_ok = 0
+    fixed = 0
+    unresolvable = []
+
+    for q in questions:
+        options = q.options or []
+        current = (q.correctOption or "").strip()
+
+        # Already correct: no action needed.
+        if current in options:
+            already_ok += 1
+            continue
+
+        # The known-broken pattern: correctOption is a bare position-letter
+        # instead of the option text itself. Resolve it by index.
+        letter = current.upper()
+        if letter in LETTER_TO_INDEX and LETTER_TO_INDEX[letter] < len(options):
+            real_answer = options[LETTER_TO_INDEX[letter]]
+            await db.question.update(
+                where={"id": q.id},
+                data={"correctOption": real_answer}
+            )
+            print(f"  Fixed #{q.indexNumber} [{q.category}]: correctOption {current!r} -> {real_answer!r}")
+            fixed += 1
+        else:
+            unresolvable.append(q)
+
+    print(f"\nDone — {already_ok} already correct, {fixed} repaired.")
+
+    if unresolvable:
+        print(f"\n{len(unresolvable)} question(s) could NOT be auto-repaired")
+        print("(correctOption isn't a recognized letter and doesn't match any option):\n")
+        for q in unresolvable:
+            print(f"  #{q.indexNumber} [{q.id}] category={q.category!r}")
+            print(f"     correctOption={q.correctOption!r}")
+            print(f"     options={q.options}")
+        print("\nFix these manually: open the question via Edit on the dashboard's")
+        print("Exam Questions page and re-pick the correct option from the list.")
+
+    await db.disconnect()
+
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    if len(sys.argv) > 1 and sys.argv[1] in ("fix-correct-options", "fix_correct_options", "--fix-correct-options"):
+        asyncio.run(fix_correct_options())
+    else:
+        asyncio.run(seed())
