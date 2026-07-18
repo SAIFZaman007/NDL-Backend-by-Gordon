@@ -2,81 +2,37 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query, UploadFile
 from typing import List, Optional
 from app.db import db
 from app.routers.auth_router import get_current_user
+from app.services import cloudinary_service
 from pydantic import BaseModel
 import re
 import datetime
-import os
-import uuid
-import shutil
 
 router = APIRouter()
 
 
 # ── Upload configuration ───────────────────────────────────────
-UPLOAD_ROOT = os.getenv("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
-BLOG_UPLOAD_DIR = os.path.join(UPLOAD_ROOT, "blog")
-BLOG_UPLOAD_URL_PREFIX = "/uploads/blog"
-
-ALLOWED_IMAGE_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
-MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
-
-
-def save_cover_image(coverImage: UploadFile) -> str:
+# Cover images are uploaded straight to Cloudinary (see
+# app/services/cloudinary_service.py) — only the resulting secure_url is
+# ever stored in BlogPost.coverImage. save_cover_image/delete_cover_image
+# keep their original names and signatures below; only their internals
+# changed, so create_post/update_post/delete_post needed no further changes
+# beyond awaiting them.
+async def save_cover_image(coverImage: UploadFile) -> str:
     """
-    Validate and persist an uploaded cover image to disk.
-    Returns the relative URL path stored in BlogPost.coverImage.
+    Validate an uploaded cover image and upload it to Cloudinary.
+    Returns the secure_url stored in BlogPost.coverImage.
     """
-    content_type = (coverImage.content_type or "").lower()
-    if content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported image type '{content_type}'. Allowed: JPEG, PNG, WEBP, GIF."
-        )
-
-    # Enforce the size limit by seeking the underlying SpooledTemporaryFile —
-    # this never loads the whole file into memory.
-    coverImage.file.seek(0, os.SEEK_END)
-    size = coverImage.file.tell()
-    coverImage.file.seek(0)
-    if size == 0:
-        raise HTTPException(status_code=400, detail="Uploaded cover image is empty.")
-    if size > MAX_IMAGE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Cover image exceeds the {MAX_IMAGE_SIZE_BYTES // (1024 * 1024)} MB limit."
-        )
-
-    os.makedirs(BLOG_UPLOAD_DIR, exist_ok=True)
-    # A UUID filename prevents collisions AND path-traversal via a crafted
-    # client filename — the original name is never used on disk.
-    filename = f"{uuid.uuid4().hex}{ALLOWED_IMAGE_TYPES[content_type]}"
-    destination = os.path.join(BLOG_UPLOAD_DIR, filename)
-    with open(destination, "wb") as out_file:
-        shutil.copyfileobj(coverImage.file, out_file)
-
-    return f"{BLOG_UPLOAD_URL_PREFIX}/{filename}"
+    return await cloudinary_service.upload_image(coverImage, folder=cloudinary_service.BLOG_FOLDER)
 
 
-def delete_cover_image(cover_image_url: Optional[str]) -> None:
+async def delete_cover_image(cover_image_url: Optional[str]) -> None:
     """
-    Best-effort removal of a locally stored cover image. External URLs
-    (http/https) and missing files are ignored silently — deleting a post
-    must never fail because of filesystem state.
+    Best-effort removal of a Cloudinary-hosted cover image. External URLs
+    (e.g. legacy local "/uploads/..." paths, or any other http/https URL)
+    are ignored silently — deleting a post must never fail because of
+    remote storage state.
     """
-    if not cover_image_url or not cover_image_url.startswith(BLOG_UPLOAD_URL_PREFIX):
-        return
-    filename = os.path.basename(cover_image_url)
-    path = os.path.join(BLOG_UPLOAD_DIR, filename)
-    try:
-        if os.path.isfile(path):
-            os.remove(path)
-    except OSError:
-        pass
+    await cloudinary_service.delete_image(cover_image_url)
 
 
 # ── Helpers ────────────────────────────────────────────────────
@@ -120,7 +76,7 @@ async def list_published_posts(
 
 
 @router.get("/categories")
-async def list_categories():
+async def list_categories(): 
     """Get all unique blog categories (public)"""
     posts = await db.blogpost.find_many(
         where={"published": True},
@@ -170,7 +126,7 @@ async def create_post(
     published: Optional[bool] = Form(False),
     coverImage: Optional[UploadFile] = File(None),
 ):
-    """Admin: Create a new blog post (multipart/form-data — coverImage is an uploaded file)"""
+    """Admin: Create a new blog post (multipart/form-data — coverImage is an uploaded file, stored on Cloudinary)"""
     slug = slugify(title)
 
     # Ensure slug is unique
@@ -182,7 +138,7 @@ async def create_post(
     # coverImage as an empty part with no filename — treat that as "no image".
     cover_image_url = None
     if coverImage is not None and coverImage.filename:
-        cover_image_url = save_cover_image(coverImage)
+        cover_image_url = await save_cover_image(coverImage)
 
     post = await db.blogpost.create(
         data={
@@ -233,8 +189,8 @@ async def update_post(
     # Only replace the stored image when an actual file was uploaded.
     # Omitting coverImage keeps the existing image untouched.
     if coverImage is not None and coverImage.filename:
-        new_cover_url = save_cover_image(coverImage)
-        delete_cover_image(post.coverImage)  # reclaim disk from the old file
+        new_cover_url = await save_cover_image(coverImage)
+        await delete_cover_image(post.coverImage)  # reclaim the old Cloudinary asset
         update_data["coverImage"] = new_cover_url
 
     updated = await db.blogpost.update(
@@ -266,5 +222,5 @@ async def delete_post(post_id: str):
         raise HTTPException(status_code=404, detail="Blog post not found")
 
     await db.blogpost.delete(where={"id": post_id})
-    delete_cover_image(post.coverImage)  # remove orphaned local image file
+    await delete_cover_image(post.coverImage)  # remove the orphaned Cloudinary asset
     return {"status": "deleted", "id": post_id}

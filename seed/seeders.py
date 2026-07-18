@@ -570,7 +570,7 @@ async def seed():
         data={
             "title": "AWS Solutions Architect Associate",
             "description": "Master AWS core services, architecture best practices, and exam objectives for the Solutions Architect Associate certification.",
-            "thumbnailUrl": "https://example.com/aws.png",
+            "thumbnailUrl": "https://images.unsplash.com/photo-1580106815433-a5b1d1d53d85?w=500",
             "difficulty": "Associate",
             "isPopular": True
         }
@@ -599,7 +599,7 @@ async def seed():
         data={
             "title": "Golden Kubestronaut",
             "description": "Interview and exam preparation Q&A for Kubernetes certification tracks.",
-            "thumbnailUrl": "https://example.com/k8s.png",
+            "thumbnailUrl": "https://images.unsplash.com/photo-1634646809203-f3b4adff9127?w=500",
             "difficulty": "Advanced",
             "courseType": "PREPARATION"
         }

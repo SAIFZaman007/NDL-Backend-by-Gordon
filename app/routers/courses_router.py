@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from typing import List, Optional
 from app.db import db
 from app.routers.auth_router import get_current_user
+from app.services import cloudinary_service
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -115,21 +116,36 @@ def verify_admin(current_user = Depends(get_current_user)):
         )
     return current_user
 
-class CourseCreateRequest(BaseModel):
-    title: str
-    description: str
-    thumbnailUrl: str
-    difficulty: str
-    isPopular: Optional[bool] = False
-    courseType: Optional[str] = "STANDARD"
 
-class CourseUpdateRequest(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    thumbnailUrl: Optional[str] = None
-    difficulty: Optional[str] = None
-    isPopular: Optional[bool] = None
-    courseType: Optional[str] = None
+# ── Upload configuration (course thumbnails) ────────────────────
+# Thumbnails are uploaded straight to Cloudinary (see
+# app/services/cloudinary_service.py) — only the resulting secure_url is
+# ever written to Course.thumbnailUrl, a plain, required String column, so
+# prisma/schema.prisma needs no changes. save_thumbnail_image/
+# delete_thumbnail_image keep their original names and signatures below;
+# only their internals changed, so create_course/update_course/
+# delete_course needed no further changes beyond awaiting them.
+#
+# The Form/File parameter on the endpoints below is deliberately still
+# named "thumbnailUrl" (an UploadFile, not a string) to keep the exact
+# parameter name the dashboard and this router have always used.
+async def save_thumbnail_image(thumbnailUrl: UploadFile) -> str:
+    """
+    Validate an uploaded course thumbnail and upload it to Cloudinary.
+    Returns the secure_url stored in Course.thumbnailUrl.
+    """
+    return await cloudinary_service.upload_image(thumbnailUrl, folder=cloudinary_service.COURSE_FOLDER)
+
+
+async def delete_thumbnail_image(thumbnail_url: Optional[str]) -> None:
+    """
+    Best-effort removal of a Cloudinary-hosted course thumbnail. External
+    URLs (e.g. seeded Unsplash images, or legacy local "/uploads/..."
+    paths) are ignored silently — updating/deleting a course must never
+    fail because of remote storage state.
+    """
+    await cloudinary_service.delete_image(thumbnail_url)
+
 
 class LessonCreateRequest(BaseModel):
     title: str
@@ -144,39 +160,63 @@ class LessonUpdateRequest(BaseModel):
     orderIndex: Optional[int] = None
 
 @router.post("", response_model=None, dependencies=[Depends(verify_admin)])
-async def create_course(data: CourseCreateRequest):
+async def create_course(
+    title: str = Form(...),
+    description: str = Form(...),
+    difficulty: str = Form(...),
+    isPopular: Optional[bool] = Form(False),
+    courseType: Optional[str] = Form("STANDARD"),
+    thumbnailUrl: UploadFile = File(...),
+):
+    """Admin: Create a new course (multipart/form-data — thumbnailUrl is an uploaded image file, stored on Cloudinary)"""
+    thumbnail_path = await save_thumbnail_image(thumbnailUrl)
+
     new_course = await db.course.create(
         data={
-            "title": data.title,
-            "description": data.description,
-            "thumbnailUrl": data.thumbnailUrl,
-            "difficulty": data.difficulty,
-            "isPopular": data.isPopular,
-            "courseType": data.courseType
+            "title": title,
+            "description": description,
+            "thumbnailUrl": thumbnail_path,
+            "difficulty": difficulty,
+            "isPopular": isPopular,
+            "courseType": courseType
         }
     )
     return new_course
 
 @router.put("/{course_id}", response_model=None, dependencies=[Depends(verify_admin)])
-async def update_course(course_id: str, data: CourseUpdateRequest):
+async def update_course(
+    course_id: str,
+    title: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    difficulty: Optional[str] = Form(None),
+    isPopular: Optional[bool] = Form(None),
+    courseType: Optional[str] = Form(None),
+    thumbnailUrl: Optional[UploadFile] = File(None),
+):
+    """Admin: Update a course (multipart/form-data — send thumbnailUrl only to replace the current image)"""
     # Verify course exists
     course = await db.course.find_unique(where={"id": course_id})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
         
     update_data = {}
-    if data.title is not None:
-        update_data["title"] = data.title
-    if data.description is not None:
-        update_data["description"] = data.description
-    if data.thumbnailUrl is not None:
-        update_data["thumbnailUrl"] = data.thumbnailUrl
-    if data.difficulty is not None:
-        update_data["difficulty"] = data.difficulty
-    if data.isPopular is not None:
-        update_data["isPopular"] = data.isPopular
-    if data.courseType is not None:
-        update_data["courseType"] = data.courseType
+    if title is not None:
+        update_data["title"] = title
+    if description is not None:
+        update_data["description"] = description
+    if difficulty is not None:
+        update_data["difficulty"] = difficulty
+    if isPopular is not None:
+        update_data["isPopular"] = isPopular
+    if courseType is not None:
+        update_data["courseType"] = courseType
+
+    # Only replace the stored image when an actual file was uploaded.
+    # Omitting thumbnailUrl keeps the existing image untouched.
+    if thumbnailUrl is not None and thumbnailUrl.filename:
+        new_thumbnail_path = await save_thumbnail_image(thumbnailUrl)
+        await delete_thumbnail_image(course.thumbnailUrl)  # reclaim the old Cloudinary asset
+        update_data["thumbnailUrl"] = new_thumbnail_path
 
     updated = await db.course.update(
         where={"id": course_id},
@@ -199,6 +239,7 @@ async def delete_course(course_id: str):
         await db.lesson.delete_many(where={"courseId": course_id})
 
     await db.course.delete(where={"id": course_id})
+    await delete_thumbnail_image(course.thumbnailUrl)  # remove the orphaned Cloudinary asset
     return {"status": "success", "message": "Course and all related lessons deleted successfully"}
 
 @router.post("/{course_id}/lessons", response_model=None, dependencies=[Depends(verify_admin)])
@@ -250,4 +291,3 @@ async def delete_lesson(lesson_id: str):
     await db.userprogress.delete_many(where={"lessonId": lesson_id})
     await db.lesson.delete(where={"id": lesson_id})
     return {"status": "success", "message": "Lesson deleted successfully"}
-
