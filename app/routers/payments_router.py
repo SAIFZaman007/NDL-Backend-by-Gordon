@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Request
 from app.db import db
 from app.routers.auth_router import get_current_user
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 import stripe
 import os
 
@@ -30,7 +31,8 @@ async def create_checkout_session(data: CheckoutRequest, current_user = Depends(
         raise HTTPException(status_code=400, detail="Invalid plan type")
 
     try:
-        session = stripe.checkout.Session.create(
+        session = await run_in_threadpool(
+            stripe.checkout.Session.create,
             payment_method_types=["card"],
             line_items=[{
                 "price_data": {
@@ -54,22 +56,30 @@ async def create_checkout_session(data: CheckoutRequest, current_user = Depends(
             }
         )
         return {"session_id": session.id, "checkout_url": session.url}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/verify-session")
 async def verify_session(data: VerifyRequest):
     try:
-        session = stripe.checkout.Session.retrieve(data.session_id)
-        if session.payment_status == "paid":
-            user_id = session.client_reference_id
+        # Blocking network call — see the comment in create_checkout_session.
+        session_obj = await run_in_threadpool(stripe.checkout.Session.retrieve, data.session_id)
+
+
+        session = session_obj.to_dict()
+
+        if session.get("payment_status") == "paid":
+            user_id = session.get("client_reference_id")
             if not user_id:
-                user_id = session.metadata.get("user_id")
+                user_id = (session.get("metadata") or {}).get("user_id")
 
             if user_id:
                 user = await db.user.find_unique(where={"id": user_id})
                 if user and user.membershipLevel != "premium":
-                    plan_type = session.metadata.get("plan_type", "monthly") if session.metadata else "monthly"
+                    metadata = session.get("metadata") or {}
+                    plan_type = metadata.get("plan_type", "monthly")
                     amount = 15.00 if plan_type == "monthly" else 120.00
                     await db.payment.create(
                         data={
@@ -87,6 +97,8 @@ async def verify_session(data: VerifyRequest):
                 raise HTTPException(status_code=400, detail="User ID not found in session metadata")
         else:
             raise HTTPException(status_code=400, detail="Payment not completed")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -96,36 +108,33 @@ async def stripe_webhook(request: Request):
     sig_header = request.headers.get("stripe-signature")
     webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
-    if not sig_header or not webhook_secret:
-        # Fallback processing if webhook is not configured with secret
-        try:
-            event = stripe.Event.construct_from(
-                await request.json(), stripe.api_key
-            )
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid payload")
-    else:
-        try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, webhook_secret
-            )
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid payload")
-        except stripe.error.SignatureVerificationError:
-            raise HTTPException(status_code=400, detail="Invalid signature")
+    if not webhook_secret:
+        raise HTTPException(status_code=503, detail="Webhook is not configured.")
+    if not sig_header:
+        raise HTTPException(status_code=400, detail="Missing Stripe-Signature header")
+
+    try:
+        # Blocking call — see the comment in create_checkout_session.
+        event_obj = await run_in_threadpool(stripe.Webhook.construct_event, payload, sig_header, webhook_secret)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    event = event_obj.to_dict()
 
     # Handle the checkout.session.completed event
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
+    if event.get("type") == "checkout.session.completed":
+        session = event.get("data", {}).get("object", {})
         user_id = session.get("client_reference_id")
         if not user_id:
-            user_id = session.get("metadata", {}).get("user_id")
-            
+            user_id = (session.get("metadata") or {}).get("user_id")
+
         if user_id:
             user = await db.user.find_unique(where={"id": user_id})
             if user and user.membershipLevel != "premium":
-                metadata = session.get("metadata", {})
-                plan_type = metadata.get("plan_type", "monthly") if metadata else "monthly"
+                metadata = session.get("metadata") or {}
+                plan_type = metadata.get("plan_type", "monthly")
                 amount = 15.00 if plan_type == "monthly" else 120.00
                 await db.payment.create(
                     data={
