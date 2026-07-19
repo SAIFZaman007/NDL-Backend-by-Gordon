@@ -62,6 +62,10 @@ jobs:
             echo "=== Rebuilding Docker image ==="
             docker build -t gordon-backend .
 
+            echo "=== Setting up Docker Network ==="
+            docker network create gordon-net || true
+            docker network connect gordon-net gordon-postgres || true
+
             echo "=== Stopping old container ==="
             docker stop gordon-backend-container || true
             docker rm gordon-backend-container || true
@@ -69,6 +73,7 @@ jobs:
             echo "=== Starting new container ==="
             docker run -d \
               --name gordon-backend-container \
+              --network gordon-net \
               --restart unless-stopped \
               -p 8000:8000 \
               -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
