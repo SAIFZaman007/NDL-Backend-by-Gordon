@@ -64,7 +64,17 @@ jobs:
 
             echo "=== Setting up Docker Network ==="
             docker network create gordon-net || true
-            docker network connect gordon-net gordon-postgres || true
+
+            echo "=== Ensuring Database is running ==="
+            docker start gordon-postgres || docker run -d \
+              --name gordon-postgres \
+              --network gordon-net \
+              --restart unless-stopped \
+              -e POSTGRES_USER=inara \
+              -e POSTGRES_PASSWORD=__sujan05__ \
+              -e POSTGRES_DB=gordon_db \
+              -p 5432:5432 \
+              postgres:15-alpine
 
             echo "=== Stopping old container ==="
             docker stop gordon-backend-container || true
