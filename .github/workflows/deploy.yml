@@ -66,8 +66,15 @@ jobs:
               -p 8000:8000 \
               -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
               -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+              -e ACCESS_TOKEN_EXPIRE_MINUTES="${{ secrets.ACCESS_TOKEN_EXPIRE_MINUTES }}" \
+              -e ALLOWED_ORIGINS="${{ secrets.ALLOWED_ORIGINS }}" \
               -e STRIPE_SECRET_KEY="${{ secrets.STRIPE_SECRET_KEY }}" \
+              -e STRIPE_PUBLISHABLE_KEY="${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
               -e STRIPE_WEBHOOK_SECRET="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+              -e CLOUDINARY_CLOUD_NAME="${{ secrets.CLOUDINARY_CLOUD_NAME }}" \
+              -e CLOUDINARY_API_KEY="${{ secrets.CLOUDINARY_API_KEY }}" \
+              -e CLOUDINARY_API_SECRET="${{ secrets.CLOUDINARY_API_SECRET }}" \
+              -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
               gordon-backend
 
             echo "=== Waiting for container to start ==="

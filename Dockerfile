@@ -1,37 +1,34 @@
-# Use official lightweight Python image
+# Official lightweight Python image
 FROM python:3.11-slim
 
-# Set environment variables
+# Setting environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000
 
-# Set working directory
+# Setting working directory
 WORKDIR /app
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     openssl \
     libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install python dependencies
+# Copying requirements and installing python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
+# Copying project files
 COPY . .
 
-# Generate Prisma client locally inside the container filesystem
+# Generating Prisma client locally inside the container filesystem
 RUN prisma generate
-
 RUN mkdir -p /app/uploads/blog
 
-# Expose backend port
+# Exposing backend port
 EXPOSE 8000
 
 # ── Container health check (30s) ────────────────────────────────────────────
-
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/health || exit 1
 
