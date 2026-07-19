@@ -60,7 +60,7 @@ jobs:
             cd ~/gordon-backend
 
             echo "=== Rebuilding Docker image ==="
-            docker build --load -t gordon-backend .
+            docker build -t gordon-backend .
 
             echo "=== Stopping old container ==="
             docker stop gordon-backend-container || true
